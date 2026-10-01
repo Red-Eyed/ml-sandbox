@@ -1,0 +1,26 @@
+[project]
+name = "ml-sandbox"
+version = "0.1.0"
+description = "Small, inspectable notebooks for learning deep-learning training mechanics"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "altair>=5.5",
+    "ipykernel>=6.29",
+    "jupyterlab>=4.3",
+    "nbmake>=1.5",
+    "nbconvert>=7.16",
+    "pyrefly>=0.31",
+    "pytest>=8.3",
+    "rich>=14.0",
+    "ruff>=0.9",
+    "torch>=2.5",
+    "vl-convert-python>=1.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100

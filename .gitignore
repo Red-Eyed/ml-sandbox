@@ -1,0 +1,13 @@
+.venv/
+.ipynb_checkpoints/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.pyrefly/
+dist/
+
+# Visual explanations belong in notebook HTML outputs, not binary assets.
+*.gif
+*.jpeg
+*.jpg
+*.png
