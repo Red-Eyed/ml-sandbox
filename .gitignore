@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 .pyrefly/
 dist/
+plan.md
 
 # Visual explanations belong in notebook HTML outputs, not binary assets.
 *.gif

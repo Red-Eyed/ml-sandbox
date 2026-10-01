@@ -10,9 +10,15 @@ ML behavior stays visible in notebook cells where it can be inspected and modifi
 
 ## Current Scope
 
-The repository is currently an empty, notebook-ready scaffold. The next experiment should be one
-small notebook built around one explicit question. Add later topics as independent experiments
-rather than building a training framework.
+The repository grows one reviewed experiment at a time. Each completed notebook stands alone and
+keeps the mechanism being taught visible in its cells rather than moving it into a training
+framework.
+
+## Experiments
+
+1. [Where does a parameter gradient live?](01_parameters/parameter_and_gradient.ipynb) inspects
+   parameter values, the autograd graph, hand-derived gradients, per-example contributions,
+   accumulation across backward passes, and resetting `.grad` to `None`.
 
 ## Run the Experiments
 

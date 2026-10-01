@@ -30,8 +30,14 @@ Keep each notebook small enough to understand in one sitting. Follow this progre
 
 Visualization carries the explanation. Use Rich for exact textual state and Altair for relationships such as comparisons or trajectories. Commit executed outputs as compact inline SVG so static GitHub previews work. Each notebook must remain below 512 KiB and contain no raster output, generated image assets, or JavaScript-dependent charts.
 
+Every committed notebook and visualization must be fully compatible with GitHub's static renderer. A reader must see the complete explanation directly on GitHub without executing the notebook, opening an external site, trusting JavaScript, or loading a Jupyter widget. Use static HTML and inline SVG outputs; represent multi-step processes with static trajectories, selected-step storyboards, or small multiples rather than runtime animation.
+
+Before presenting a notebook as complete, inspect its executed output MIME types and rendered visuals. Confirm that the explanation uses only static text or HTML and inline SVG, with no raster output, executable JavaScript, or widget state.
+
 Avoid trainers, registries, configuration systems, base model classes, and one-use abstractions. Prefer readable repetition when extraction would hide the lesson.
 
 ## Reviews and Commits
 
 Run `./checks.sh` after every change. Pull requests should name the question being taught and explain how the experiment and visualization answer it. Commit messages use an imperative subject of at most 72 characters, concrete change bullets, and a final paragraph explaining the motivation and design choice.
+
+Do not create commits unless the user explicitly requests a commit.

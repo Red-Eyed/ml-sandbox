@@ -22,6 +22,10 @@ run_static_checks() {
     uv run pyrefly check src
 }
 
+run_python_tests() {
+    uv run pytest tests
+}
+
 run_notebook_checks() {
     local notebooks=()
     local notebook
@@ -95,6 +99,7 @@ main() {
     ./setup.sh
     run_shell_checks
     run_static_checks
+    run_python_tests
     run_notebook_checks
     notebook_count="$(check_notebook_sizes)"
     check_notebook_outputs

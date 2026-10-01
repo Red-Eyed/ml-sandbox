@@ -3,6 +3,16 @@
 from collections.abc import Mapping, Sequence
 
 import altair as alt
+import vl_convert as vlc
+
+
+def chart_to_svg(chart: alt.Chart) -> str:
+    """Return standalone SVG markup for static notebook output.
+
+    The conversion runs locally and embeds no executable JavaScript. Conversion
+    failures from Vega-Lite are propagated to the caller.
+    """
+    return vlc.vegalite_to_svg(chart.to_dict())
 
 
 def bar_chart(
@@ -51,7 +61,7 @@ def grouped_bar_chart(
         alt.Chart(alt.Data(values=data))
         .mark_bar()
         .encode(
-            x=alt.X("category:N", title=None),
+            x=alt.X("category:N", sort=list(categories), title=None),
             xOffset="series:N",
             y=alt.Y("value:Q", title=y_title),
             color=alt.Color("series:N", title=None),
