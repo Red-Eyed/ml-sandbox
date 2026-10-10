@@ -52,6 +52,7 @@ def grouped_bar_chart(
     y_title: str,
 ) -> alt.Chart:
     """Return grouped bars that compare named series within each category."""
+    series_names = list(series)
     data = [
         {"category": category, "value": float(value), "series": name}
         for name, values in series.items()
@@ -62,11 +63,43 @@ def grouped_bar_chart(
         .mark_bar()
         .encode(
             x=alt.X("category:N", sort=list(categories), title=None),
-            xOffset="series:N",
+            xOffset=alt.XOffset("series:N", sort=series_names),
             y=alt.Y("value:Q", title=y_title),
-            color=alt.Color("series:N", title=None),
+            color=alt.Color("series:N", sort=series_names, title=None),
             tooltip=[
                 alt.Tooltip("category:N"),
+                alt.Tooltip("series:N"),
+                alt.Tooltip("value:Q", format=".6g"),
+            ],
+        )
+        .properties(title=title, width=600, height=300)
+    )
+
+
+def line_chart(
+    x_values: Sequence[float],
+    series: Mapping[str, Sequence[float]],
+    *,
+    title: str,
+    x_title: str,
+    y_title: str,
+) -> alt.Chart:
+    """Return ordered point-and-line trajectories over shared numeric positions."""
+    series_names = list(series)
+    data = [
+        {"x": float(x), "value": float(value), "series": name}
+        for name, values in series.items()
+        for x, value in zip(x_values, values, strict=True)
+    ]
+    return (
+        alt.Chart(alt.Data(values=data))
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("x:Q", title=x_title),
+            y=alt.Y("value:Q", title=y_title),
+            color=alt.Color("series:N", sort=series_names, title=None),
+            tooltip=[
+                alt.Tooltip("x:Q", title=x_title),
                 alt.Tooltip("series:N"),
                 alt.Tooltip("value:Q", format=".6g"),
             ],
