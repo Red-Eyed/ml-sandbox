@@ -60,8 +60,8 @@ check_notebook_sizes() {
 }
 
 check_notebook_outputs() {
-    if grep -R -E -q '"image/(png|jpeg|gif)"' --include='*.ipynb' --exclude-dir='.venv' .; then
-        printf 'Notebook outputs must not contain raster images.\n' >&2
+    if grep -R -E -q '"image/(png|gif)"' --include='*.ipynb' --exclude-dir='.venv' .; then
+        printf 'Raster notebook outputs must use compact JPEG images.\n' >&2
         exit 1
     fi
 
