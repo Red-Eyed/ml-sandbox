@@ -1,1 +1,1 @@
-"""Presentation tooling for the ML Sandbox notebooks."""
+"""Presentation tooling and reusable numerical diagnostics for PyTorch experiments."""

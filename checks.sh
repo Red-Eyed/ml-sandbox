@@ -20,10 +20,13 @@ run_static_checks() {
     uv run ruff check .
     uv run ruff format --check .
     uv run pyrefly check src
+    uv run pyrefly check --preset default \
+        src/ml_sandbox/numerical_finiteness \
+        05_numerical_stability/numerical_stability.ipynb
 }
 
 run_python_tests() {
-    uv run pytest tests
+    uv run pytest tests src/ml_sandbox/numerical_finiteness
 }
 
 run_notebook_checks() {
@@ -82,11 +85,60 @@ check_image_assets() {
     fi
 }
 
+verify_wheel() {
+    local distribution_directory="$1"
+    uv run python - "$distribution_directory" <<'PY'
+"""Check wheel contents and execute the public API from the wheel itself."""
+
+import sys
+from pathlib import Path
+from zipfile import ZipFile
+
+import torch
+from torch import Tensor
+
+wheels = list(Path(sys.argv[1]).glob("*.whl"))
+assert len(wheels) == 1
+wheel = wheels[0]
+with ZipFile(wheel) as archive:
+    names = archive.namelist()
+assert "ml_sandbox/py.typed" in names
+assert "ml_sandbox/numerical_finiteness/_check.py" in names
+assert not any(Path(name).name.startswith("test_") for name in names)
+
+sys.path.insert(0, str(wheel))
+import ml_sandbox.numerical_finiteness as finiteness
+
+assert finiteness.__file__ and finiteness.__file__.startswith(str(wheel))
+
+
+def loss(x: Tensor) -> Tensor:
+    """Retain a finite forward value with an infinite derivative at zero."""
+    return x.sqrt()
+
+
+def sample(generator: torch.Generator) -> finiteness.Sample:
+    """Supply a named finite boundary input to the packaged checker."""
+    return finiteness.Sample((torch.tensor(0.0, requires_grad=True),), "exact_zero")
+
+
+report = finiteness.check_finiteness(
+    loss, sample, max_trials=3, required_gradients=(0,), max_examples=1, quiet=True
+)
+assert report.trials == report.random.nonfinite_gradient == 3
+assert report.random.nonfinite_loss == 0
+assert report.strategies["exact_zero"].rate("nonfinite_gradient") == 1.0
+assert len(report.examples) == 1
+print(f"Wheel API verified: {wheel.name}")
+PY
+}
+
 build_package() (
     local build_dir
     build_dir=$(mktemp -d "${TMPDIR:-/tmp}/ml-sandbox-check.XXXXXX")
     trap 'rm -rf "$build_dir"' EXIT
     uv build --out-dir "$build_dir/dist"
+    verify_wheel "$build_dir/dist"
 )
 
 main() {

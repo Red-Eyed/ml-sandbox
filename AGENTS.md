@@ -10,7 +10,7 @@ The repository currently contains no experiments. Treat it as an intentional not
 
 Notebooks are the product. Keep the demonstrated machine-learning mechanism directly in notebook cells; never hide it in helpers. Use basic PyTorch tensors, autograd, and `nn.Parameter`, with high-level PyTorch modules only as numerical references.
 
-`src/ml_sandbox/` is an installable package for presentation tooling only. Altair builds charts, Rich presents exact values, and `vl-convert-python` renders charts as inline SVG. `setup.sh` installs the locked project editably, so notebook imports resolve without relative paths. Keep Bash scripts decomposed into short, single-purpose functions.
+`src/ml_sandbox/` is an installable package for presentation tooling and reusable numerical diagnostics. Keep the demonstrated ML mechanisms in notebook cells; generic diagnostic utilities may live in the package with co-located tests. Altair builds charts, Rich presents exact values, and `vl-convert-python` renders charts as inline SVG. `setup.sh` installs the locked project editably, so notebook imports resolve without relative paths. Keep Bash scripts decomposed into short, single-purpose functions.
 
 ## Development Commands
 
