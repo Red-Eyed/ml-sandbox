@@ -33,6 +33,8 @@ def matcher_presets() -> dict[str, MatcherConfig]:
         "Class + ProbIoU": MatcherConfig(
             (CostTerm(Metric.CLASSIFICATION, 1), CostTerm(Metric.PROBIOU, 2))
         ),
+        "Geometry only: ProbIoU": MatcherConfig((CostTerm(Metric.PROBIOU, 1),)),
+        "Geometry only: Hausdorff": MatcherConfig((CostTerm(Metric.HAUSDORFF, 1),)),
         "Geometry only: rotated IoU": MatcherConfig((CostTerm(Metric.IOU, 1),)),
     }
 
@@ -63,6 +65,14 @@ def scene_presets() -> dict[str, Scene]:
         "Rotated crossing": Scene(
             (Box("G1", 50, 50, 60, 6, radians(40)),),
             (Prediction(Box("P1", 50, 50, 60, 6, radians(-40)), 0.8),),
+        ),
+        "Oversized competing prediction": Scene(
+            (Box("G1", 40, 52, 42, 7, radians(12)), Box("G2", 62, 68, 38, 7, radians(12))),
+            (
+                Prediction(Box("P1", 32, 68, 40, 7, radians(16)), 1.0),
+                Prediction(Box("P2", 60, 64, 38, 8, radians(5)), 1.0),
+                Prediction(Box("P3", 70, 50, 20, 103, radians(-25)), 1.0),
+            ),
         ),
         "Empty scene": Scene((), ()),
     }

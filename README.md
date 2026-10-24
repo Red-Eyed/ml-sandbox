@@ -48,9 +48,9 @@ JupyterLab's widget frontend; GitHub displays the saved static SVG examples.
   counterclockwise degrees in the editor, radians in the backend; y increases upward.
 - Add/remove either box type, edit numeric geometry, and adjust each prediction's
   independent foreground-confidence slider. Numeric edits apply on Enter or blur.
-- Enable classification, normalized L1, true rotated IoU, or Gaussian ProbIoU and adjust
+- Enable classification, normalized L1, true rotated IoU, Gaussian ProbIoU, or Hausdorff distance and adjust
   their weights. Similarities support `1-S` and `-log(max(S, epsilon))`; classification
-  always uses `-log(max(p, epsilon))`. L1 normalization scales stay fixed during zoom.
+  always uses `-log(max(p, epsilon))`. L1 and Hausdorff normalization scales stay fixed during zoom.
 - Inspect the combined matrix or an enabled component's unweighted transformed costs.
   Magenta outlines always show the combined assignment. Pair selectors distinguish raw
   metrics, transformed costs, weighted contributions, and the total.
@@ -64,6 +64,30 @@ scenes work. Tied optima may change identity. With one foreground class, classif
 is constant across each row: it can select rows when P > G but cannot change a square
 assignment by itself. Gaussian tails can underflow at extreme separation; the log floor
 is visible and configurable. Invalid geometry or nonfinite costs produce a message.
+
+Choose **Geometry only: Hausdorff** to test the WACV 2025 paper's sampled symmetric
+Hausdorff matching distance with classification excluded. **Hausdorff points** selects
+4 corners, 8 corners/midpoints, or 32 evenly sampled boundary points (8 per edge).
+The score is the larger of the two directed maximum nearest-point distances; lower
+is better. It is an unbounded distance and ignores the similarity-transform selector.
+It is an exact distance between sampled point sets, approximating boundary distance.
+Changing point count changes the approximation; it need not change scores monotonically.
+
+Normalization follows the [official RHINO HausdorffCost](https://github.com/SIAnalytics/RHINO/blob/main/mmrotate/models/task_modules/assigners/match_cost.py):
+divide `cx,w` by **x scale** and `cy,h` by **y scale**, preserve the angle, then construct
+rotated boundary points. The defaults are 100 for both. Unequal scales differ from
+scaling world-space corners after rotation. These shared controls also normalize L1.
+The selected-pair inspector displays this normalized distance as both raw metric and
+unweighted cost, then separately shows its weighted contribution.
+
+Try **Oversized competing prediction**, a constructed illustration of the screenshot
+failure, and switch between **Geometry only: ProbIoU** and **Geometry only: Hausdorff**.
+The latter chooses P1 → G1 and P2 → G2. The former chooses P3 → G1 and P2 → G2.
+Try 4/8/32 points while moving and rotating the same boxes. This tests the geometric
+term alone; RHINO's full configuration also uses classification and a KLD term, and
+its adaptive denoising is outside this lab. See [the paper](https://arxiv.org/html/2305.07598v5).
+The backend uses NumPy for matching; this addition does not introduce a differentiable
+training loss. Restart an already running notebook kernel after updating the package.
 
 Motion computations are limited to 30 requests per second, with a final evaluation on
 release. This small-scene prototype redraws the scene and heatmap together; frame rate

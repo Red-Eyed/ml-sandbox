@@ -138,6 +138,7 @@ class MatcherLab:
                     for term in self.term_controls.values()
                 ],
                 widgets.HBox([self.transform, self.epsilon]),
+                self.hausdorff_points,
                 widgets.HBox(
                     [self.x_scale, self.y_scale, self.angle_weight],
                     layout=widgets.Layout(flex_flow="row wrap"),
@@ -204,9 +205,15 @@ class MatcherLab:
         self.epsilon = widgets.FloatLogSlider(
             description="Log floor ε", base=10, min=-15, max=-2, value=1e-12, readout_format=".0e"
         )
-        self.x_scale = widgets.FloatText(description="L1 x scale", value=100)
-        self.y_scale = widgets.FloatText(description="L1 y scale", value=100)
+        self.x_scale = widgets.FloatText(description="x scale", value=100)
+        self.y_scale = widgets.FloatText(description="y scale", value=100)
         self.angle_weight = widgets.FloatSlider(description="L1 angle", min=0, max=5, step=0.1)
+        self.hausdorff_points = widgets.Dropdown(
+            description="Hausdorff points",
+            options=[4, 8, 32],
+            value=4,
+            style={"description_width": "initial"},
+        )
         self.minimum_control = widgets.BoundedFloatText(
             description="Min side", value=0.01, min=1e-9, max=1e6
         )
@@ -217,6 +224,7 @@ class MatcherLab:
             self.x_scale,
             self.y_scale,
             self.angle_weight,
+            self.hausdorff_points,
         ):
             control.observe(self._config_changed, names="value")
 
@@ -254,6 +262,7 @@ class MatcherLab:
         self.x_scale.value, self.y_scale.value = self.config.x_scale, self.config.y_scale
         self.angle_weight.max = max(5, self.config.angle_weight)
         self.angle_weight.value = self.config.angle_weight
+        self.hausdorff_points.value = self.config.hausdorff_points
         self.updating = False
 
     def _rebuild_scene_controls(self) -> None:
@@ -380,6 +389,7 @@ class MatcherLab:
                 self.x_scale.value,
                 self.y_scale.value,
                 self.angle_weight.value,
+                self.hausdorff_points.value,
             )
         except ValueError as error:
             self._load_config_controls()
@@ -567,6 +577,9 @@ class MatcherLab:
             return
         self.evaluation_error = Absent("Evaluation succeeded")
         self.evaluation, self.assignment = evaluation, assignment
+        self.hausdorff_points.disabled = not any(
+            term.metric == Metric.HAUSDORFF and term.weight > 0 for term in self.config.terms
+        )
         self.updating = True
         previous = self.matrix_choice.value
         self.matrix_choice.options = ["Combined", *(c.metric.value for c in evaluation.components)]
@@ -653,6 +666,10 @@ class MatcherLab:
             f"(|Δcy|+|Δh|)/{self.config.y_scale:g} + "
             f"{self.config.angle_weight:g} × periodic |Δθ|/π. "
             "Normalization stays fixed when zooming.<br>"
+            f"<b>Hausdorff:</b> symmetric nearest-point maximum over "
+            f"{self.config.hausdorff_points} boundary points. "
+            "Normalize cx/w by x scale and cy/h by y scale before rotation, preserving angle "
+            "(RHINO convention). Lower is better; no similarity transform.<br>"
             "Single class: confidence is constant across each row; it can select rows in an "
             "overcomplete scene but cannot change a square assignment by itself. "
             "Equal-cost optima may switch without a change in optimal total.</p>"

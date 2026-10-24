@@ -186,3 +186,22 @@ def test_saved_lab_has_only_static_evidence() -> None:
                         for element in root.iter()
                     )
     assert svg_count >= 2
+
+
+def test_hausdorff_preset_sampling_and_inspection(lab: MatcherLab) -> None:
+    """The preset and sampling selector update costs, matrix, and pair diagnostics immediately."""
+    lab.preset_choice.value = "Geometry only: Hausdorff"
+    assert [term.metric for term in lab.config.terms] == [Metric.HAUSDORFF]
+    assert lab.hausdorff_points.value == lab.config.hausdorff_points == 4
+    lab.hausdorff_points.value = 32
+    assert lab.config.hausdorff_points == 32
+    assert "32 boundary points" in lab.formula.value
+    lab.matrix_choice.value = Metric.HAUSDORFF.value
+    assert "Hausdorff cost" in lab.matrix_axes.get_title()
+    assert "Hausdorff" in lab.details.value
+    expected = lab.evaluation.total.copy()
+    lab.transform.value = Transform.LOG.value
+    np.testing.assert_array_equal(lab.evaluation.total, expected)
+    buttons = {button.description: button for button in lab.view.children[4].children}
+    buttons["Reset baseline"].click()
+    assert lab.hausdorff_points.value == lab.config.hausdorff_points == 4

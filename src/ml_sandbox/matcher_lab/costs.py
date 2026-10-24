@@ -16,6 +16,7 @@ class Metric(StrEnum):
     L1 = "L1"
     IOU = "Rotated IoU"
     PROBIOU = "ProbIoU"
+    HAUSDORFF = "Hausdorff"
     CLASSIFICATION = "Classification"
 
 
@@ -58,6 +59,8 @@ class MatcherConfig:
 
     L1 sums |delta cx|/x_scale + |delta cy|/y_scale + |delta w|/x_scale
     + |delta h|/y_scale, optionally adding angle_weight * periodic angle/pi.
+    Hausdorff uses the same scales to normalize box parameters before rotation.
+    Its boundary sample count is 4, 8, or 32.
     Scales are fixed scene units, independent of zoom or box count. Epsilon is
     an explicit log floor, never a cap on L1 or Bhattacharyya distance.
     """
@@ -68,15 +71,18 @@ class MatcherConfig:
     x_scale: float = 100.0
     y_scale: float = 100.0
     angle_weight: float = 0.0
+    hausdorff_points: int = 4
 
     def __post_init__(self) -> None:
         """Validate all numerical controls even for empty scenes."""
         if not isfinite(self.epsilon) or not 0 < self.epsilon < 1:
             raise ValueError("Epsilon must be finite and strictly between zero and one")
         if any(not isfinite(v) or v <= 0 for v in (self.x_scale, self.y_scale)):
-            raise ValueError("L1 normalization lengths must be finite and positive")
+            raise ValueError("Coordinate normalization lengths must be finite and positive")
         if not isfinite(self.angle_weight) or self.angle_weight < 0:
             raise ValueError("L1 angle weight must be finite and nonnegative")
+        if self.hausdorff_points not in (4, 8, 32):
+            raise ValueError("Hausdorff point count must be 4, 8, or 32")
         if len({term.metric for term in self.terms}) != len(self.terms):
             raise ValueError("Enable each metric at most once")
 
@@ -152,6 +158,16 @@ def raw_metric(metric: Metric, prediction: Prediction, target: Box, config: Matc
             return rotated_iou(box, target)
         case Metric.PROBIOU:
             return probiou(box, target)
+        case Metric.HAUSDORFF:
+            from .hausdorff import hausdorff_distance
+
+            return hausdorff_distance(
+                box,
+                target,
+                num_points=config.hausdorff_points,
+                x_scale=config.x_scale,
+                y_scale=config.y_scale,
+            )
         case Metric.CLASSIFICATION:
             return prediction.confidence
 
@@ -161,7 +177,7 @@ def transform_cost(metric: Metric, raw: FloatArray, config: MatcherConfig) -> Fl
     match metric:
         case Metric.CLASSIFICATION:
             return -np.log(np.maximum(raw, config.epsilon))
-        case Metric.L1:
+        case Metric.L1 | Metric.HAUSDORFF:
             return raw.copy()
         case Metric.IOU | Metric.PROBIOU:
             match config.transform:
