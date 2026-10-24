@@ -24,6 +24,66 @@ framework.
    compares square-root losses, checks boundary cases, and demonstrates a time-budgeted
    Monte Carlo tester that aggregates failures instead of stopping at the first one.
 
+3. [Which prediction should match this text box?](06_hungarian_matcher/matcher_lab.ipynb)
+   is a live oriented-box Hungarian matcher lab. Move, resize, and rotate boxes; change
+   confidences and costs; inspect assignments, the cost matrix, and pair contributions.
+
+## Interactive Hungarian Matcher Lab
+
+In VS Code, open `06_hungarian_matcher/matcher_lab.ipynb`, select the repository's
+`.venv/bin/python` notebook kernel, and run the **first code cell**. It launches the
+live editor independently of the later examples. Keep the kernel running. The Microsoft
+Python and Jupyter extensions are required; the installed ipympl backend supports
+[VS Code notebooks](https://matplotlib.org/ipympl/).
+
+For JupyterLab, run `./setup.sh`, then
+`uv run jupyter lab 06_hungarian_matcher/matcher_lab.ipynb` and run the first code cell
+or choose **Run All Cells**. The locked environment includes NumPy, SciPy, Matplotlib,
+ipympl, and ipywidgets. Use this project's Python 3.12 kernel. The live UI requires
+JupyterLab's widget frontend; GitHub displays the saved static SVG examples.
+
+- Click and drag a green GT or blue prediction. Select overlapping boxes by identifier.
+- Drag square corner handles to resize along rotated local axes, keeping the opposite
+  corner fixed. Drag the yellow circle to rotate about the center. Angles are
+  counterclockwise degrees in the editor, radians in the backend; y increases upward.
+- Add/remove either box type, edit numeric geometry, and adjust each prediction's
+  independent foreground-confidence slider. Numeric edits apply on Enter or blur.
+- Enable classification, normalized L1, true rotated IoU, or Gaussian ProbIoU and adjust
+  their weights. Similarities support `1-S` and `-log(max(S, epsilon))`; classification
+  always uses `-log(max(p, epsilon))`. L1 normalization scales stay fixed during zoom.
+- Inspect the combined matrix or an enabled component's unweighted transformed costs.
+  Magenta outlines always show the combined assignment. Pair selectors distinguish raw
+  metrics, transformed costs, weighted contributions, and the total.
+- Use starter scenes, hide arrows, fit the viewport, or reset the matcher baseline.
+  Dashed boxes and the status line identify unmatched predictions and targets.
+
+The explicit Phase 1 baseline uses classification 1 + L1 5 + rotated IoU 2. It is an OBB
+prototype baseline, **not standard DETR's GIoU configuration**. Rectangular matching always
+assigns `min(P, G)` pairs; there are no implicit thresholds or dummy assignments. Empty
+scenes work. Tied optima may change identity. With one foreground class, classification
+is constant across each row: it can select rows when P > G but cannot change a square
+assignment by itself. Gaussian tails can underflow at extreme separation; the log floor
+is visible and configurable. Invalid geometry or nonfinite costs produce a message.
+
+Motion computations are limited to 30 requests per second, with a final evaluation on
+release. This small-scene prototype redraws the scene and heatmap together; frame rate
+depends on scene size and frontend latency. Continuous fields, GIoU/DIoU, side-by-side
+matchers, stability sweeps, random generators, and scene export are deferred to later phases.
+More intuitive matching does not establish better detection accuracy.
+
+To execute the lab and refresh its saved SVG examples without persisting widget state:
+
+```bash
+uv run 06_hungarian_matcher/execute.py
+```
+
+The numerical core and mouse-event/widget tests are co-located in
+`src/ml_sandbox/matcher_lab/` and run through `./checks.sh`. Re-running the live
+initialization cell closes its previous app instance. Use `lab.close()` to release it
+explicitly. See the [ProbIoU paper](https://arxiv.org/abs/2106.06072),
+[SciPy assignment semantics](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html),
+and [ipympl documentation](https://matplotlib.org/ipympl/) for the underlying definitions.
+
 ## Reuse the Package
 
 Install this checkout into another Python 3.12 environment:
@@ -113,5 +173,5 @@ notebook-size and no-image policies, and verify that the installable package bui
 when the repository intentionally contains no notebooks.
 
 Altair renders charts as compact inline SVG that remains visible in static GitHub previews. Rich
-renders exact tensor values and tables as HTML-capable notebook output. The repository contains no
-generated image files or JavaScript-dependent chart outputs.
+renders exact tensor values and tables as HTML-capable notebook output. Saved matcher-lab examples also use vector SVG. Its live Jupyter controls use widgets at
+runtime; the saved examples remain readable without JavaScript or widget state.

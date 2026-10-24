@@ -22,11 +22,14 @@ run_static_checks() {
     uv run pyrefly check src
     uv run pyrefly check --preset default \
         src/ml_sandbox/numerical_finiteness \
+        src/ml_sandbox/matcher_lab \
+        06_hungarian_matcher/execute.py \
+        06_hungarian_matcher/matcher_lab.ipynb \
         05_numerical_stability/numerical_stability.ipynb
 }
 
 run_python_tests() {
-    uv run pytest tests src/ml_sandbox/numerical_finiteness
+    uv run pytest tests src/ml_sandbox/numerical_finiteness src/ml_sandbox/matcher_lab
 }
 
 run_notebook_checks() {
@@ -104,6 +107,8 @@ with ZipFile(wheel) as archive:
     names = archive.namelist()
 assert "ml_sandbox/py.typed" in names
 assert "ml_sandbox/numerical_finiteness/_check.py" in names
+assert "ml_sandbox/matcher_lab/geometry.py" in names
+assert "ml_sandbox/matcher_lab/assignment.py" in names
 assert not any(Path(name).name.startswith("test_") for name in names)
 
 sys.path.insert(0, str(wheel))
@@ -129,7 +134,14 @@ assert report.trials == report.random.nonfinite_gradient == 3
 assert report.random.nonfinite_loss == 0
 assert report.strategies["exact_zero"].rate("nonfinite_gradient") == 1.0
 assert len(report.examples) == 1
-print(f"Wheel API verified: {wheel.name}")
+import ml_sandbox.matcher_lab as matcher_lab
+
+assert matcher_lab.__file__ and matcher_lab.__file__.startswith(str(wheel))
+box = matcher_lab.Box("G1", 0, 0, 4, 2)
+prediction = matcher_lab.Prediction(matcher_lab.Box("P1", 0, 0, 4, 2), 0.9)
+evaluation = matcher_lab.evaluate_costs((prediction,), (box,), matcher_lab.baseline())
+assert matcher_lab.solve_assignment(evaluation.total).pairs == ((0, 0),)
+print(f"Wheel APIs verified: {wheel.name}")
 PY
 }
 
