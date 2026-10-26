@@ -32,7 +32,7 @@ framework.
 
 In VS Code, open `06_hungarian_matcher/matcher_lab.ipynb`, select the repository's
 `.venv/bin/python` notebook kernel, and run the **first code cell**. It launches the
-live editor independently of the later examples. Keep the kernel running. The Microsoft
+live editor. The notebook contains only launch instructions and this editor. Keep the kernel running. The Microsoft
 Python and Jupyter extensions are required; the installed ipympl backend supports
 [VS Code notebooks](https://matplotlib.org/ipympl/).
 
@@ -40,7 +40,7 @@ For JupyterLab, run `./setup.sh`, then
 `uv run jupyter lab 06_hungarian_matcher/matcher_lab.ipynb` and run the first code cell
 or choose **Run All Cells**. The locked environment includes NumPy, SciPy, Matplotlib,
 ipympl, and ipywidgets. Use this project's Python 3.12 kernel. The live UI requires
-JupyterLab's widget frontend; GitHub displays the saved static SVG examples.
+a widget frontend in VS Code or JupyterLab; GitHub displays the launch instructions only.
 
 - Click and drag a green GT or blue prediction. Select overlapping boxes by identifier.
 - Drag square corner handles to resize along rotated local axes, keeping the opposite
@@ -62,7 +62,10 @@ JupyterLab's widget frontend; GitHub displays the saved static SVG examples.
 - Use starter scenes, hide arrows, fit the viewport, or reset the matcher baseline.
   Dashed boxes and the status line identify unmatched predictions and targets.
 
-The explicit Phase 1 baseline uses classification 1 + L1 5 + rotated IoU 2. It is an OBB
+The editor starts with **DETR-style: L1 + ProbIoU**: normalized L1 × 5 plus
+ProbIoU cost × 2, excluding classification. The default similarity transform is `1-S`.
+Original DETR uses classification + L1 + GIoU; this preset substitutes ProbIoU for geometry.
+The separate Phase 1 baseline uses classification 1 + L1 5 + rotated IoU 2. It is an OBB
 prototype baseline, **not standard DETR's GIoU configuration**. Rectangular matching always
 assigns `min(P, G)` pairs; there are no implicit thresholds or dummy assignments. Empty
 scenes work. Tied optima may change identity. With one foreground class, classification
@@ -135,12 +138,12 @@ The returned mean is `(200,200)` and the physical rectangle has sides 80 and 40.
 These NumPy diagnostics support matching experiments, not autograd training losses.
 
 Motion computations are limited to 30 requests per second, with a final evaluation on
-release. This small-scene prototype redraws the scene and heatmap together; frame rate
-depends on scene size and frontend latency. Continuous fields, GIoU/DIoU, side-by-side
-matchers, stability sweeps, random generators, and scene export are deferred to later phases.
+release. Plot objects are reused, layout is recalculated on resize, and pending redraws are
+coalesced. Frame rate depends on scene size and frontend latency. Continuous fields,
+GIoU/DIoU, stability sweeps, random generators, and scene export are deferred to later phases.
 More intuitive matching does not establish better detection accuracy.
 
-To execute the lab and refresh its saved SVG examples without persisting widget state:
+To verify that the interactive editor initializes and save the notebook without runtime outputs:
 
 ```bash
 uv run 06_hungarian_matcher/execute.py
@@ -258,5 +261,5 @@ notebook-size and no-image policies, and verify that the installable package bui
 when the repository intentionally contains no notebooks.
 
 Altair renders charts as compact inline SVG that remains visible in static GitHub previews. Rich
-renders exact tensor values and tables as HTML-capable notebook output. Saved matcher-lab examples also use vector SVG. Its live Jupyter controls use widgets at
+renders exact tensor values and tables as HTML-capable notebook output. The interactive matcher lab uses Jupyter widgets at
 runtime; the saved examples remain readable without JavaScript or widget state.

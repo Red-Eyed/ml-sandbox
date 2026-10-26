@@ -30,6 +30,9 @@ def matcher_presets() -> dict[str, MatcherConfig]:
     """Return independent named configurations without hidden normalization."""
     return {
         "Baseline: class + L1 + rotated IoU": baseline(),
+        "DETR-style: L1 + ProbIoU": MatcherConfig(
+            (CostTerm(Metric.L1, 5), CostTerm(Metric.PROBIOU, 2))
+        ),
         "Class + ProbIoU": MatcherConfig(
             (CostTerm(Metric.CLASSIFICATION, 1), CostTerm(Metric.PROBIOU, 2))
         ),

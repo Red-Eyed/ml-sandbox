@@ -162,8 +162,8 @@ def test_invalid_evaluation_clears_stale_assignment(
     assert lab.matrix_axes.collections
 
 
-def test_saved_lab_has_only_static_evidence() -> None:
-    """Check the actual saved artifact, including widget metadata and SVG internals."""
+def test_saved_lab_contains_only_interactive_launcher() -> None:
+    """The notebook launches the live editor without static examples or saved widget state."""
     from pathlib import Path
 
     import nbformat
@@ -174,20 +174,31 @@ def test_saved_lab_has_only_static_evidence() -> None:
     assert isinstance(notebook, NotebookNode)
     assert "widgets" not in notebook.metadata
     assert path.stat().st_size < 512 * 1024
-    svg_count = 0
-    for cell in notebook.cells:
-        for output in cell.get("outputs", []):
-            assert output.output_type != "error"
-            for mime, value in output.get("data", {}).items():
-                assert mime in {"text/plain", "text/html", "image/svg+xml"}
-                if mime == "image/svg+xml":
-                    svg_count += 1
-                    root = ElementTree.fromstring(value)
-                    assert all(
-                        element.tag.rsplit("}", 1)[-1] not in {"image", "script"}
-                        for element in root.iter()
-                    )
-    assert svg_count >= 2
+    assert [cell.cell_type for cell in notebook.cells] == ["markdown", "code"]
+    assert "%matplotlib widget" in notebook.cells[1].source
+    assert "display(lab.view)" in notebook.cells[1].source
+    assert 'matcher_presets()["DETR-style: L1 + ProbIoU"]' in notebook.cells[1].source
+    assert not notebook.cells[1].outputs
+
+
+def test_detr_style_preset_combines_l1_and_probiou(lab: MatcherLab) -> None:
+    """The combined preset adds the two weighted geometry costs without classification."""
+    from .costs import CostTerm, MatcherConfig, evaluate_costs
+
+    lab.preset_choice.value = "DETR-style: L1 + ProbIoU"
+    assert lab.config.terms == (CostTerm(Metric.L1, 5), CostTerm(Metric.PROBIOU, 2))
+    expected = sum(
+        weight
+        * evaluate_costs(
+            lab.scene.predictions,
+            lab.scene.targets,
+            MatcherConfig((CostTerm(metric, 1),)),
+        ).total
+        for metric, weight in ((Metric.L1, 5), (Metric.PROBIOU, 2))
+    )
+    np.testing.assert_allclose(lab.evaluation.total, expected)
+    lab.confidences.children[0].value = 0.01
+    np.testing.assert_allclose(lab.evaluation.total, expected)
 
 
 def test_hausdorff_preset_sampling_and_inspection(lab: MatcherLab) -> None:
