@@ -414,6 +414,7 @@ class MatcherLab:
                 radians(values["angle °"]),
             )
             self._replace_box(box)
+            self._sync_numeric()
             self.refresh()
         except ValueError as error:
             self._sync_numeric()
@@ -595,7 +596,7 @@ class MatcherLab:
                 angle = (
                     drag.box.angle + atan2(current[1], current[0]) - atan2(initial[1], initial[0])
                 )
-                box = replace(drag.box, angle=(angle + np.pi) % (2 * np.pi) - np.pi)
+                box = replace(drag.box, angle=angle)
         self._replace_box(box)
         self._sync_numeric()
         self.refresh()

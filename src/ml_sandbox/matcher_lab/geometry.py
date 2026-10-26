@@ -11,10 +11,13 @@ FloatArray = NDArray[np.float64]
 
 @dataclass(frozen=True)
 class Box:
-    """A named OBB with positive dimensions and a counterclockwise angle in radians.
+    """A named OBB with width >= height and a counterclockwise long-edge angle.
 
-    Width and height are local-axis lengths. Coordinates are unrestricted finite
-    Cartesian values; the display viewport does not constrain geometry.
+    Width is the longest side; angle is measured from +x in radians in
+    [-pi/2, pi/2). Short-width inputs are re-encoded with swapped dimensions
+    and a quarter-turn, preserving their physical rectangle. Squares retain
+    their supplied orientation modulo pi. Cartesian coordinates are finite
+    and unrestricted by the display viewport.
     """
 
     id: str
@@ -25,13 +28,23 @@ class Box:
     angle: float = 0.0
 
     def __post_init__(self) -> None:
-        """Reject invalid geometry at construction rather than during assignment."""
+        """Validate geometry and enforce the long-edge representation at construction."""
         if not self.id:
             raise ValueError("Box identifiers must be nonempty")
         if not all(isfinite(v) for v in (self.cx, self.cy, self.width, self.height, self.angle)):
             raise ValueError(f"{self.id}: box parameters must be finite")
         if self.width <= 0 or self.height <= 0:
             raise ValueError(f"{self.id}: width and height must be positive")
+
+        width, height, angle = self.width, self.height, self.angle
+        if width < height:
+            width, height = height, width
+            angle += pi / 2
+        if not -pi / 2 <= angle < pi / 2:
+            angle = (angle + pi / 2) % pi - pi / 2
+        object.__setattr__(self, "width", width)
+        object.__setattr__(self, "height", height)
+        object.__setattr__(self, "angle", angle)
 
     @property
     def center(self) -> FloatArray:
@@ -128,9 +141,11 @@ def angle_distance(a: float, b: float) -> float:
 
 
 def resize_from_corner(box: Box, index: int, point: FloatArray, minimum: float) -> Box:
-    """Move a local-axis corner while fixing its opposite corner and rotation.
+    """Move a corner in the original local frame while fixing its opposite corner.
 
     Crossing the opposite corner stops at the explicit minimum side length.
+    If the long side changes, construction swaps dimensions and turns the
+    stored angle by a quarter-turn without changing the resized rectangle.
     """
     signs = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]], dtype=np.float64)[index]
     anchor = corners(box)[(index + 2) % 4]

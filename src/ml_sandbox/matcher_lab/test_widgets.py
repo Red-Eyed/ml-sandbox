@@ -296,3 +296,34 @@ def test_comparison_preview_is_vector_only() -> None:
     assert all(element.tag.rsplit("}", 1)[-1] not in {"image", "script"} for element in root.iter())
     for metric in GEOMETRIC_METRICS:
         assert metric.value in svg
+
+
+def test_numeric_side_swap_updates_long_edge_controls(lab: MatcherLab) -> None:
+    """Numeric side edits immediately show canonical dimensions and long-edge angle."""
+    lab.selection.value = "P1"
+    original = find_box(lab.scene, "P1")
+    lab.numeric["height"].value = original.width + 10
+    box = find_box(lab.scene, "P1")
+    assert box.width == original.width + 10
+    assert box.height == original.width
+    assert lab.numeric["width"].value == box.width
+    assert lab.numeric["height"].value == box.height
+    assert lab.numeric["angle °"].value == pytest.approx(np.degrees(box.angle))
+    assert box.angle == pytest.approx(original.angle + pi / 2)
+
+
+def test_mouse_resize_can_change_long_axis(lab: MatcherLab) -> None:
+    """Dragging through an axis swap keeps the opposite physical corner fixed."""
+    lab.selection.value = "P1"
+    lab.figure.canvas.draw()
+    original = find_box(lab.scene, "P1")
+    anchor = corners(original)[0]
+    point = anchor + np.array([5, 70]) @ original.rotation.T
+    pointer(lab, "button_press_event", corners(original)[2])
+    pointer(lab, "button_release_event", point)
+    box = find_box(lab.scene, "P1")
+    assert box.width == pytest.approx(70, abs=0.4)
+    assert box.height == pytest.approx(5, abs=0.4)
+    assert np.min(np.linalg.norm(corners(box) - anchor, axis=1)) < 1e-10
+    assert lab.numeric["width"].value == box.width
+    assert lab.numeric["height"].value == box.height

@@ -216,3 +216,19 @@ def test_gaussian_distance_costs_are_not_similarity_transformed(metric: Metric) 
     np.testing.assert_array_equal(base.total, base.components[0].raw)
     assert np.isfinite(base.total).all()
     assert (base.total >= 0).all()
+
+
+def test_combined_matches_equivalent_long_edge_box() -> None:
+    """The combined matcher must not penalize a swapped encoding of an identical box."""
+    from .assignment import solve_assignment
+    from .presets import matcher_presets
+
+    scene = scene_presets()["Oversized competing prediction"]
+    target = scene.targets[0]
+    equivalent = Box("P3", target.cx, target.cy, target.height, target.width, target.angle - pi / 2)
+    predictions = (*scene.predictions[:2], Prediction(equivalent, 1))
+    evaluation = evaluate_costs(
+        predictions, scene.targets, matcher_presets()["DETR-style: L1 + ProbIoU"]
+    )
+    assert evaluation.total[2, 0] == pytest.approx(0, abs=1e-12)
+    assert solve_assignment(evaluation.total).pairs == ((1, 1), (2, 0))
