@@ -28,7 +28,7 @@ from .costs import (
 )
 from .gaussian import CovarianceConvention
 from .geometry import Box, FloatArray, contains, resize_from_corner
-from .presets import Scene, baseline, matcher_presets, scene_presets
+from .presets import Scene, baseline, scene_presets
 from .visualization import (
     Absent,
     draw_matrix,
@@ -187,7 +187,6 @@ class MatcherLab:
                 widgets.HTML("<b>Independent foreground confidences</b>"),
                 self.confidences,
                 widgets.HTML("<b>Weighted matcher (Combined view only)</b>"),
-                self.preset_choice,
                 *[
                     widgets.HBox([term.enabled, term.weight])
                     for term in self.term_controls.values()
@@ -229,12 +228,6 @@ class MatcherLab:
 
     def _build_cost_controls(self) -> None:
         """Build independent term toggles, weights, and numerical parameters."""
-        self.preset_choice = widgets.Dropdown(
-            description="Matcher",
-            options=["Custom", *matcher_presets()],
-            layout=widgets.Layout(width="440px"),
-        )
-        self.preset_choice.observe(self._preset_changed, names="value")
         self.term_controls = {
             metric: TermControl(
                 widgets.Checkbox(
@@ -313,11 +306,8 @@ class MatcherLab:
         return button
 
     def _load_config_controls(self) -> None:
-        """Load a complete preset without triggering intermediate recomputations."""
+        """Reflect the configuration without triggering intermediate recomputations."""
         self.updating = True
-        self.preset_choice.value = next(
-            (name for name, config in matcher_presets().items() if config == self.config), "Custom"
-        )
         weights = {term.metric: term.weight for term in self.config.terms}
         for metric, term in self.term_controls.items():
             term.enabled.value = metric in weights
@@ -466,21 +456,8 @@ class MatcherLab:
             self._load_config_controls()
             self._show_error(error)
             return
-        self.updating = True
-        self.preset_choice.value = "Custom"
-        self.updating = False
         for term in self.term_controls.values():
             term.weight.disabled = not term.enabled.value
-        self.refresh()
-
-    def _preset_changed(self, change: Any) -> None:
-        """Load matcher weights and parameters without modifying shared geometry."""
-        if self.updating:
-            return
-        if change["new"] == "Custom":
-            return
-        self.config = matcher_presets()[change["new"]]
-        self._load_config_controls()
         self.refresh()
 
     def _scene_changed(self, change: Any) -> None:
@@ -557,9 +534,6 @@ class MatcherLab:
     def _reset(self, button: Any) -> None:
         """Restore the declared baseline while preserving the user's scene."""
         self.config = baseline()
-        self.updating = True
-        self.preset_choice.value = next(iter(matcher_presets()))
-        self.updating = False
         self._load_config_controls()
         self.refresh()
 

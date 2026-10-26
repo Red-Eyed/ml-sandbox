@@ -30,6 +30,14 @@ def lab() -> Iterator[MatcherLab]:
     plt.switch_backend(previous)
 
 
+def set_terms(lab: MatcherLab, weights: dict[Metric, float]) -> None:
+    """Configure the combined cost through the same term controls available to users."""
+    for metric, control in lab.term_controls.items():
+        control.enabled.value = metric in weights
+        if metric in weights:
+            control.weight.value = weights[metric]
+
+
 def pointer(lab: MatcherLab, name: str, point: np.ndarray) -> None:
     """Dispatch a data-space gesture through Matplotlib's registered callback path."""
     x, y = lab.scene_axes.transData.transform(point)
@@ -116,7 +124,7 @@ def test_scene_management_and_baseline_reset(lab: MatcherLab) -> None:
     buttons["Remove selected"].click()
     assert not lab.scene.predictions
     assert lab.assignment.unmatched_targets == (0,)
-    lab.preset_choice.value = "Class + ProbIoU"
+    set_terms(lab, {Metric.CLASSIFICATION: 1, Metric.PROBIOU: 2})
     buttons["Reset baseline"].click()
     assert lab.config == baseline()
     assert len(lab.scene.targets) == 1
@@ -181,11 +189,12 @@ def test_saved_lab_contains_only_interactive_launcher() -> None:
     assert not notebook.cells[1].outputs
 
 
-def test_detr_style_preset_combines_l1_and_probiou(lab: MatcherLab) -> None:
-    """The combined preset adds the two weighted geometry costs without classification."""
+def test_combined_controls_add_l1_and_probiou(lab: MatcherLab) -> None:
+    """Direct controls combine weighted geometry costs without a matcher preset dropdown."""
     from .costs import CostTerm, MatcherConfig, evaluate_costs
 
-    lab.preset_choice.value = "DETR-style: L1 + ProbIoU"
+    assert not hasattr(lab, "preset_choice")
+    set_terms(lab, {Metric.L1: 5, Metric.PROBIOU: 2})
     assert lab.config.terms == (CostTerm(Metric.L1, 5), CostTerm(Metric.PROBIOU, 2))
     expected = sum(
         weight
@@ -201,9 +210,9 @@ def test_detr_style_preset_combines_l1_and_probiou(lab: MatcherLab) -> None:
     np.testing.assert_allclose(lab.evaluation.total, expected)
 
 
-def test_hausdorff_preset_sampling_and_inspection(lab: MatcherLab) -> None:
-    """The preset and sampling selector update costs, matrix, and pair diagnostics immediately."""
-    lab.preset_choice.value = "Geometry only: Hausdorff"
+def test_hausdorff_controls_sampling_and_inspection(lab: MatcherLab) -> None:
+    """Term controls and sampling update costs, matrix, and pair diagnostics immediately."""
+    set_terms(lab, {Metric.HAUSDORFF: 1})
     assert [term.metric for term in lab.config.terms] == [Metric.HAUSDORFF]
     assert lab.hausdorff_points.value == lab.config.hausdorff_points == 4
     lab.hausdorff_points.value = 32
@@ -220,12 +229,12 @@ def test_hausdorff_preset_sampling_and_inspection(lab: MatcherLab) -> None:
     assert lab.hausdorff_points.value == lab.config.hausdorff_points == 4
 
 
-def test_gaussian_convention_and_symmetric_kl_preset(lab: MatcherLab) -> None:
+def test_gaussian_convention_and_symmetric_kl_controls(lab: MatcherLab) -> None:
     """The shared conversion setting updates every enabled Gaussian cost and its inspection."""
     from .gaussian import CovarianceConvention
 
     lab.scene_choice.value = "Separated boxes"
-    lab.preset_choice.value = "Geometry only: Symmetric KL (mean)"
+    set_terms(lab, {Metric.SYMMETRIC_KL: 1})
     original = lab.evaluation.total.copy()
     lab.gaussian_convention.value = CovarianceConvention.HALF_EXTENT.value
     assert lab.config.gaussian_convention == CovarianceConvention.HALF_EXTENT
@@ -235,7 +244,10 @@ def test_gaussian_convention_and_symmetric_kl_preset(lab: MatcherLab) -> None:
     assert CovarianceConvention.HALF_EXTENT.value in lab.details.value
     lab.matrix_choice.value = Metric.SYMMETRIC_KL.value
     assert "Symmetric KL" in lab.matrix_axes.get_title()
-    lab.preset_choice.value = "Geometry only: Gaussian W2"
+    set_terms(lab, {Metric.WASSERSTEIN: 1})
+    assert lab.config.gaussian_convention == CovarianceConvention.HALF_EXTENT
+    buttons = {button.description: button for button in lab.view.children[4].children}
+    buttons["Reset baseline"].click()
     assert lab.config.gaussian_convention == CovarianceConvention.UNIFORM
     assert lab.gaussian_convention.value == CovarianceConvention.UNIFORM.value
 
