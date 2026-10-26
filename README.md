@@ -39,7 +39,7 @@ Python and Jupyter extensions are required; the installed ipympl backend support
 For JupyterLab, run `./setup.sh`, then
 `uv run jupyter lab 06_hungarian_matcher/matcher_lab.ipynb` and run the first code cell
 or choose **Run All Cells**. The locked environment includes NumPy, SciPy, Matplotlib,
-ipympl, and ipywidgets. Use this project's Python 3.12 kernel. The live UI requires
+ipympl, and ipywidgets. Use this project's Python 3.11 kernel. The live UI requires
 a widget frontend in VS Code or JupyterLab; GitHub displays the launch instructions only.
 
 - Click and drag a green GT or blue prediction. Select overlapping boxes by identifier.
@@ -174,7 +174,7 @@ analysis settings. They are not claimed to reproduce each paper's full matcher o
 
 ## Reuse the Package
 
-Install this checkout into another Python 3.12 environment:
+Install this checkout into another Python 3.11 environment:
 
 ```bash
 uv pip install --editable /path/to/ml-sandbox

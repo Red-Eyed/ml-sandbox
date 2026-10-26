@@ -6,21 +6,19 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from time import perf_counter
-from typing import Literal, assert_never
+from typing import Literal, TypeAlias, assert_never
 
 import torch
 from rich.progress import Progress
 from torch import Tensor
 
-type Inputs = tuple[Tensor, ...]
-type Loss = Callable[..., Tensor]
-type Sampler = Callable[[torch.Generator], Inputs | Sample]
-type Source = Literal["boundary", "random"]
-type Issue = Literal[
+Inputs: TypeAlias = tuple[Tensor, ...]
+Loss: TypeAlias = Callable[..., Tensor]
+Source: TypeAlias = Literal["boundary", "random"]
+Issue: TypeAlias = Literal[
     "nonfinite_loss", "nonfinite_gradient", "exception", "missing_required_gradient"
 ]
-type Metric = Issue | Literal["disconnected"]
-type FailureKind = tuple[Source, str, tuple[Issue, ...], tuple[str, str] | Absent]
+Metric: TypeAlias = Issue | Literal["disconnected"]
 
 
 @dataclass(frozen=True)
@@ -41,6 +39,10 @@ class Absent:
     """Explain why a measurement or gradient is unavailable."""
 
     reason: str
+
+
+Sampler: TypeAlias = Callable[[torch.Generator], Inputs | Sample]
+FailureKind: TypeAlias = tuple[Source, str, tuple[Issue, ...], tuple[str, str] | Absent]
 
 
 _NO_TIME_LIMIT = Absent("no time limit")

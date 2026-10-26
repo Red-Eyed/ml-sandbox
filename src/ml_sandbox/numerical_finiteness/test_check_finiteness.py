@@ -3,6 +3,7 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import TypeAlias
 
 import pytest
 import torch
@@ -21,7 +22,7 @@ from ml_sandbox.numerical_finiteness import (
     check_finiteness,
 )
 
-type Runner = Callable[..., FinitenessReport]
+Runner: TypeAlias = Callable[..., FinitenessReport]
 NO_TRIAL_LIMIT = Absent("no trial limit")
 
 
