@@ -48,12 +48,17 @@ JupyterLab's widget frontend; GitHub displays the saved static SVG examples.
   counterclockwise degrees in the editor, radians in the backend; y increases upward.
 - Add/remove either box type, edit numeric geometry, and adjust each prediction's
   independent foreground-confidence slider. Numeric edits apply on Enter or blur.
-- Enable classification, normalized L1, true rotated IoU, Gaussian ProbIoU, or Hausdorff distance and adjust
+- Enable classification, normalized L1, true rotated IoU, Gaussian ProbIoU, Hausdorff, or Gaussian distances and adjust
   their weights. Similarities support `1-S` and `-log(max(S, epsilon))`; classification
   always uses `-log(max(p, epsilon))`. L1 and Hausdorff normalization scales stay fixed during zoom.
-- Inspect the combined matrix or an enabled component's unweighted transformed costs.
-  Magenta outlines always show the combined assignment. Pair selectors distinguish raw
-  metrics, transformed costs, weighted contributions, and the total.
+- Inspect the combined matrix or any geometry-only metric's unweighted transformed costs.
+  Magenta outlines show the inspected method's own assignment. Pair selectors distinguish
+  raw metrics, transformed costs, weighted contributions, and the total.
+- Compare all ten geometry-only metrics simultaneously on the same editable boxes.
+  Click a metric panel (or use **Inspect**) to focus its own assignment and cost matrix.
+  **Combined** retains the separately configurable weighted matcher. Geometry-only panels
+  ignore its weights and confidences; they share the representation and distance settings.
+  Totals use different units and cannot rank metrics.
 - Use starter scenes, hide arrows, fit the viewport, or reset the matcher baseline.
   Dashed boxes and the status line identify unmatched predictions and targets.
 
@@ -89,6 +94,46 @@ its adaptive denoising is outside this lab. See [the paper](https://arxiv.org/ht
 The backend uses NumPy for matching; this addition does not introduce a differentiable
 training loss. Restart an already running notebook kernel after updating the package.
 
+Gaussian comparison presets now include **KL P → GT**, **KL GT → P**,
+**Symmetric KL (mean)**, **Gaussian W2**, **Bhattacharyya**, and **Hellinger**.
+All use the same `box_to_gaussian` converter as ProbIoU. **Gaussian covariance**
+selects the uniform-rectangle convention `R diag(w²,h²) Rᵀ / 12` (default) or the
+half-extent convention `R diag(w²,h²) Rᵀ / 4`. Presets restore the default convention;
+changing the dropdown applies one shared representation to every enabled Gaussian term.
+
+The converter validates geometry and stores immutable means, major/minor standard
+deviations, and principal-axis orientation. Distances work from covariance factors;
+they do not invert the dense matrix. The pair inspector shows both means and dense
+covariances plus the retained principal standard deviations. Extreme aspect ratios
+can lose their small eigenvalue in a dense display matrix; factor calculations retain it.
+Unrepresentable variances and nonfinite distances are rejected, without covariance jitter.
+Gaussian approximations lose the orientation of square boxes regardless of distance.
+
+Symmetric KL is `(KL(P || GT) + KL(GT || P)) / 2`, explicitly the mean, and is a
+symmetric divergence rather than a triangle-inequality metric. KL and Bhattacharyya
+are dimensionless. **Gaussian W2 is unsquared and uses scene units**. Hellinger is
+unsquared and bounded in `[0,1]`; it equals `1 - ProbIoU` mathematically, so it is not
+an independent geometric representation. These distance costs receive no similarity
+transform, clipping, or hidden normalization. The x/y scale controls apply only to
+L1/Hausdorff. Raw totals from different methods are not directly comparable.
+
+The public API accepts the lab's Cartesian `Box`, or `NormalizedBox` for detector
+records `(cx, cy, w, h, cosine, sine)` in `[0,1]`:
+
+```python
+from ml_sandbox.matcher_lab import NormalizedBox, normalized_box_to_gaussian
+from ml_sandbox.matcher_lab.gaussian_kl import symmetric_kl
+
+encoded = NormalizedBox("P1", 0.25, 0.5, 0.1, 0.1, 0.7, 0.7)
+gaussian = normalized_box_to_gaussian(encoded, image_width=800, image_height=400)
+```
+
+The adapter decodes `(2*cosine-1, 2*sine-1)`, normalizes that direction, rejects the
+undefined `(0.5,0.5)` pair, and denormalizes center/dimensions before rotating.
+It requires explicit image dimensions and preserves the caller's axis convention.
+The returned mean is `(200,200)` and the physical rectangle has sides 80 and 40.
+These NumPy diagnostics support matching experiments, not autograd training losses.
+
 Motion computations are limited to 30 requests per second, with a final evaluation on
 release. This small-scene prototype redraws the scene and heatmap together; frame rate
 depends on scene size and frontend latency. Continuous fields, GIoU/DIoU, side-by-side
@@ -104,9 +149,25 @@ uv run 06_hungarian_matcher/execute.py
 The numerical core and mouse-event/widget tests are co-located in
 `src/ml_sandbox/matcher_lab/` and run through `./checks.sh`. Re-running the live
 initialization cell closes its previous app instance. Use `lab.close()` to release it
-explicitly. See the [ProbIoU paper](https://arxiv.org/abs/2106.06072),
-[SciPy assignment semantics](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html),
-and [ipympl documentation](https://matplotlib.org/ipympl/) for the underlying definitions.
+explicitly. The live frontend uses [ipympl](https://matplotlib.org/ipympl/).
+
+### Matching method references
+
+| Method | Primary reference | Relationship to this lab |
+|---|---|---|
+| Normalized L1 | Carion et al., **End-to-End Object Detection with Transformers** (ECCV 2020): [paper](https://arxiv.org/abs/2005.12872), [official matcher](https://github.com/facebookresearch/detr/blob/main/models/matcher.py) | Sum of absolute center/size errors. Configurable scene scales and the optional periodic angle term are lab adaptations. |
+| Rotated IoU | [MMCV rotated IoU definition](https://mmcv.readthedocs.io/en/latest/api/generated/mmcv.ops.box_iou_rotated.html); Rezatofighi et al., **Generalized Intersection over Union** (CVPR 2019), [IoU definition](https://arxiv.org/abs/1902.09630) | Actual oriented-rectangle intersection/union, implemented here with polygon clipping. The lab uses Cartesian y-up coordinates and counterclockwise radians; convert conventions when comparing with image-coordinate libraries. GIoU itself is not implemented. |
+| ProbIoU | Llerena et al., **Gaussian Bounding Boxes and Probabilistic Intersection-over-Union for Object Detection**: [2021 preprint](https://arxiv.org/abs/2106.06072), [TIP 2024 publication](https://doi.org/10.1109/TIP.2023.3348697) | Gaussian covariance from rotated dimensions; similarity is one minus Hellinger distance. |
+| Gaussian Bhattacharyya distance | [ProbIoU paper, Gaussian distance derivation](https://arxiv.org/abs/2106.06072) | The unbounded distance underlying ProbIoU; also selectable directly as a geometry-only cost. |
+| Gaussian KL, both directions | Yang et al., **Learning High-Precision Bounding Box for Rotated Object Detection via Kullback-Leibler Divergence** (NeurIPS 2021): [paper](https://proceedings.neurips.cc/paper_files/paper/2021/hash/98f13708210194c475687be6106a3b84-Abstract.html) | Closed-form Gaussian KL. The symmetric mean is a lab-defined comparison of both directions; no detection-loss transforms are applied. |
+| Gaussian Wasserstein W2 | Yang et al., **Rethinking Rotated Object Detection with Gaussian Wasserstein Distance Loss** (ICML 2021): [paper](https://proceedings.mlr.press/v139/yang21l.html) | Raw unsquared W2, evaluated by factor alignment. The covariance convention is explicit and the paper's extra loss transforms are not reproduced. |
+| Hellinger distance | [ProbIoU paper](https://arxiv.org/abs/2106.06072) | Unsquared Gaussian Hellinger, equal to one minus ProbIoU. |
+| Sampled Hausdorff | Lee et al., **Hausdorff Distance Matching with Adaptive Query Denoising for Rotated Detection Transformer** (WACV 2025): [paper, §3.4 and appendix C](https://arxiv.org/html/2305.07598v5), [official RHINO cost](https://github.com/SIAnalytics/RHINO/blob/main/mmrotate/models/task_modules/assigners/match_cost.py) | Symmetric maximum nearest-point distance, with RHINO parameter normalization and 4/8/32 boundary samples. The standalone preset excludes the other RHINO costs and adaptive denoising. |
+| Classification: negative log probability | [PyTorch negative log-likelihood definition](https://docs.pytorch.org/docs/stable/generated/torch.nn.NLLLoss.html); [official DETR matching classification cost](https://github.com/facebookresearch/detr/blob/main/models/matcher.py) | The lab deliberately uses `-log(max(p, epsilon))`. Original DETR matching uses `-p`; these are different formulations. |
+| Rectangular assignment | [SciPy linear_sum_assignment](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html) | Reference solver, assigning exactly the smaller matrix dimension without implicit thresholds or dummy pairs. |
+
+The selectable `1-S` and `-log(max(S, epsilon))` similarity-to-cost transforms are lab
+analysis settings. They are not claimed to reproduce each paper's full matcher or training loss.
 
 ## Reuse the Package
 

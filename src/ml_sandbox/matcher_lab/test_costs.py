@@ -159,3 +159,60 @@ def test_gaussian_rigid_rotation_and_scaling(angle: float, scale: float) -> None
         )
     assert bhattacharyya(*transformed) == pytest.approx(bhattacharyya(a, b))
     assert 0 <= probiou(*transformed) <= 1
+
+
+def test_gaussian_conversion_shared_once_per_box() -> None:
+    """Enabling several Gaussian methods reuses one converted distribution per scene box."""
+    from .gaussian import box_to_gaussian
+
+    scene = scene_presets()["Neighboring text lines"]
+    config = MatcherConfig(
+        tuple(
+            CostTerm(metric, 1)
+            for metric in (
+                Metric.KL_FORWARD,
+                Metric.KL_REVERSE,
+                Metric.SYMMETRIC_KL,
+                Metric.PROBIOU,
+            )
+        )
+    )
+    with patch("ml_sandbox.matcher_lab.costs.box_to_gaussian", wraps=box_to_gaussian) as convert:
+        evaluation = evaluate_costs(scene.predictions, scene.targets, config)
+    assert convert.call_count == len(scene.predictions) + len(scene.targets)
+    assert len(evaluation.components) == 4
+    forward, reverse, symmetric, _ = evaluation.components
+    np.testing.assert_allclose(symmetric.raw, (forward.raw + reverse.raw) / 2)
+
+
+def test_no_gaussian_conversion_for_disabled_terms() -> None:
+    """Non-Gaussian matching does not instantiate even zero-weight Gaussian components."""
+    scene = scene_presets()["Perfect match"]
+    config = MatcherConfig((CostTerm(Metric.IOU, 1), CostTerm(Metric.SYMMETRIC_KL, 0)))
+    with patch("ml_sandbox.matcher_lab.costs.box_to_gaussian", side_effect=AssertionError):
+        assert evaluate_costs(scene.predictions, scene.targets, config).total[0, 0] == 0
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [
+        Metric.KL_FORWARD,
+        Metric.KL_REVERSE,
+        Metric.SYMMETRIC_KL,
+        Metric.WASSERSTEIN,
+        Metric.BHATTACHARYYA,
+        Metric.HELLINGER,
+    ],
+)
+def test_gaussian_distance_costs_are_not_similarity_transformed(metric: Metric) -> None:
+    """Distances keep their direction and native scale for either similarity control setting."""
+    scene = scene_presets()["Neighboring text lines"]
+    config = MatcherConfig((CostTerm(metric, 1),))
+    base = evaluate_costs(scene.predictions, scene.targets, config)
+    logged = evaluate_costs(
+        scene.predictions, scene.targets, replace(config, transform=Transform.LOG)
+    )
+    np.testing.assert_array_equal(base.total, logged.total)
+    np.testing.assert_array_equal(base.total, base.components[0].raw)
+    assert np.isfinite(base.total).all()
+    assert (base.total >= 0).all()

@@ -34,6 +34,17 @@ def matcher_presets() -> dict[str, MatcherConfig]:
             (CostTerm(Metric.CLASSIFICATION, 1), CostTerm(Metric.PROBIOU, 2))
         ),
         "Geometry only: ProbIoU": MatcherConfig((CostTerm(Metric.PROBIOU, 1),)),
+        **{
+            f"Geometry only: {metric.value}": MatcherConfig((CostTerm(metric, 1),))
+            for metric in (
+                Metric.KL_FORWARD,
+                Metric.KL_REVERSE,
+                Metric.SYMMETRIC_KL,
+                Metric.WASSERSTEIN,
+                Metric.BHATTACHARYYA,
+                Metric.HELLINGER,
+            )
+        },
         "Geometry only: Hausdorff": MatcherConfig((CostTerm(Metric.HAUSDORFF, 1),)),
         "Geometry only: rotated IoU": MatcherConfig((CostTerm(Metric.IOU, 1),)),
     }

@@ -11,10 +11,14 @@ from typing import Any, Literal
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.backend_bases import Event, MouseButton, MouseEvent
+from matplotlib.axes._base import _AxesBase
+from matplotlib.backend_bases import Event, MouseButton, MouseEvent, RendererBase
+from matplotlib.transforms import Bbox
 
-from .assignment import solve_assignment
+from .assignment import Assignment, solve_assignment
+from .comparison import GEOMETRIC_METRICS, MetricFailure, MetricMatch, compare_metrics
 from .costs import (
+    CostEvaluation,
     CostTerm,
     MatcherConfig,
     Metric,
@@ -22,9 +26,18 @@ from .costs import (
     Transform,
     evaluate_costs,
 )
+from .gaussian import CovarianceConvention
 from .geometry import Box, FloatArray, contains, resize_from_corner
 from .presets import Scene, baseline, matcher_presets, scene_presets
-from .visualization import Absent, draw_matrix, draw_scene, find_box, handle_points, pair_html
+from .visualization import (
+    Absent,
+    draw_matrix,
+    draw_metric_panel,
+    draw_scene,
+    find_box,
+    handle_points,
+    pair_html,
+)
 
 
 def mouse_callback(callback: Callable[[MouseEvent], None]) -> Callable[[Event], None]:
@@ -74,15 +87,23 @@ class MatcherLab:
         self.updating = False
         self.closed = False
         self.last_motion = 0.0
+        self.frame_pending = False
         self.minimum_size = 0.01
         self.limits = (0.0, 100.0, 0.0, 100.0)
         self.evaluation = evaluate_costs(scene.predictions, scene.targets, self.config)
         self.assignment = solve_assignment(self.evaluation.total)
         self.evaluation_error: str | Absent = Absent("Evaluation succeeded")
+        self.comparisons = compare_metrics(scene, self.config)
         with plt.ioff():
-            self.figure, (self.scene_axes, self.matrix_axes) = plt.subplots(
-                1, 2, figsize=(10.5, 4.8), layout="constrained"
-            )
+            self.figure = plt.figure(figsize=(10.5, 9), layout="constrained")
+            grid = self.figure.add_gridspec(5, 4)
+            self.scene_axes = self.figure.add_subplot(grid[:3, :2])
+            self.matrix_axes = self.figure.add_subplot(grid[3:, :2])
+            self.matrix_axes.set_axes_locator(self._matrix_bounds)
+            self.metric_axes = {
+                metric: self.figure.add_subplot(grid[index // 2, 2 + index % 2])
+                for index, metric in enumerate(GEOMETRIC_METRICS)
+            }
         if not isinstance(self.figure.canvas, widgets.Widget):
             plt.close(self.figure)
             raise TypeError("Enable %matplotlib widget before constructing MatcherLab")
@@ -93,11 +114,39 @@ class MatcherLab:
         self._load_config_controls()
         self._rebuild_scene_controls()
         self.connections = [
+            self.figure.canvas.mpl_connect("draw_event", self._frame_drawn),
+            self.figure.canvas.mpl_connect("resize_event", self._canvas_resized),
             self.figure.canvas.mpl_connect("button_press_event", mouse_callback(self._press)),
             self.figure.canvas.mpl_connect("motion_notify_event", mouse_callback(self._motion)),
             self.figure.canvas.mpl_connect("button_release_event", mouse_callback(self._release)),
         ]
         self.refresh()
+
+    def _frame_drawn(self, event: Event) -> None:
+        """Release frame backpressure and freeze the completed layout between resizes."""
+        self.frame_pending = False
+        self.figure.set_layout_engine("none")
+
+    def _canvas_resized(self, event: Event) -> None:
+        """Recalculate subplot positions once after an actual canvas resize."""
+        self.figure.set_layout_engine("constrained")
+
+    def _request_frame(self) -> None:
+        """Coalesce redraw requests until the frontend consumes the current frame."""
+        if self.frame_pending:
+            return
+        self.frame_pending = True
+        self.figure.canvas.draw_idle()
+
+    def _matrix_bounds(self, axes: _AxesBase, renderer: RendererBase) -> Bbox:
+        """Keep small cost matrices compact instead of stretching into the subplot slot."""
+        slot = axes.get_position(original=True)
+        figure_width, figure_height = self.figure.get_size_inches()
+        columns = max(1, len(self.scene.targets))
+        rows = max(1, len(self.scene.predictions))
+        width = min(slot.width, max(2.8, columns * 0.8) / figure_width)
+        height = min(slot.height, max(0.65, rows * 0.32) / figure_height)
+        return Bbox.from_bounds(slot.x0 + (slot.width - width) / 2, slot.y1 - height, width, height)
 
     def _build_controls(self) -> None:
         """Compose the scene editor, matcher settings, matrix selector, and pair inspector."""
@@ -119,9 +168,14 @@ class MatcherLab:
                 widgets.HTML(
                     "<h3>Hungarian matcher · oriented text boxes</h3>"
                     "<p>Green: GT · Blue: prediction · Magenta: assignment. "
-                    "Dashed outline: unmatched. Click a box to edit it.</p>"
+                    "Dashed outline: unmatched. Edit boxes on the large canvas; all ten "
+                    "geometry-only panels update together. Click a panel to inspect its own "
+                    "assignment and costs. Totals have different units and cannot rank metrics.</p>"
                 ),
-                widgets.HBox([self.scene_choice, self.show_arrows]),
+                widgets.HBox(
+                    [self.scene_choice, self.show_arrows, self.matrix_choice],
+                    layout=widgets.Layout(flex_flow="row wrap"),
+                ),
                 self.figure.canvas,
                 self.status,
                 widgets.HBox(buttons, layout=widgets.Layout(flex_flow="row wrap")),
@@ -132,20 +186,23 @@ class MatcherLab:
                 self.minimum_control,
                 widgets.HTML("<b>Independent foreground confidences</b>"),
                 self.confidences,
+                widgets.HTML("<b>Weighted matcher (Combined view only)</b>"),
                 self.preset_choice,
                 *[
                     widgets.HBox([term.enabled, term.weight])
                     for term in self.term_controls.values()
                 ],
+                widgets.HTML("<b>Shared metric settings</b>"),
                 widgets.HBox([self.transform, self.epsilon]),
                 self.hausdorff_points,
+                self.gaussian_convention,
                 widgets.HBox(
                     [self.x_scale, self.y_scale, self.angle_weight],
                     layout=widgets.Layout(flex_flow="row wrap"),
                 ),
                 self.formula,
                 widgets.HBox(
-                    [self.matrix_choice, self.pair_prediction, self.pair_target],
+                    [self.pair_prediction, self.pair_target],
                     layout=widgets.Layout(flex_flow="row wrap"),
                 ),
                 self.details,
@@ -181,7 +238,7 @@ class MatcherLab:
         self.term_controls = {
             metric: TermControl(
                 widgets.Checkbox(
-                    description=metric.value, indent=False, layout=widgets.Layout(width="150px")
+                    description=metric.value, indent=False, layout=widgets.Layout(width="205px")
                 ),
                 widgets.FloatSlider(
                     min=0,
@@ -214,6 +271,13 @@ class MatcherLab:
             value=4,
             style={"description_width": "initial"},
         )
+        self.gaussian_convention = widgets.Dropdown(
+            description="Gaussian covariance",
+            options=[(c.value, c.value) for c in CovarianceConvention],
+            value=CovarianceConvention.UNIFORM.value,
+            style={"description_width": "initial"},
+            layout=widgets.Layout(width="500px"),
+        )
         self.minimum_control = widgets.BoundedFloatText(
             description="Min side", value=0.01, min=1e-9, max=1e6
         )
@@ -225,12 +289,17 @@ class MatcherLab:
             self.y_scale,
             self.angle_weight,
             self.hausdorff_points,
+            self.gaussian_convention,
         ):
             control.observe(self._config_changed, names="value")
 
     def _build_inspection_controls(self) -> None:
         """Build selectors for the matrix and detailed pair inspection."""
-        self.matrix_choice = widgets.Dropdown(description="Matrix", options=["Combined"])
+        self.matrix_choice = widgets.Dropdown(
+            description="Inspect",
+            options=["Combined", *(metric.value for metric in GEOMETRIC_METRICS)],
+            layout=widgets.Layout(width="290px"),
+        )
         self.matrix_choice.observe(self._view_changed, names="value")
         self.pair_prediction = widgets.Dropdown(description="Pair pred", options=[("None", "")])
         self.pair_target = widgets.Dropdown(description="Pair GT", options=[("None", "")])
@@ -263,6 +332,7 @@ class MatcherLab:
         self.angle_weight.max = max(5, self.config.angle_weight)
         self.angle_weight.value = self.config.angle_weight
         self.hausdorff_points.value = self.config.hausdorff_points
+        self.gaussian_convention.value = self.config.gaussian_convention.value
         self.updating = False
 
     def _rebuild_scene_controls(self) -> None:
@@ -390,6 +460,7 @@ class MatcherLab:
                 self.y_scale.value,
                 self.angle_weight.value,
                 self.hausdorff_points.value,
+                CovarianceConvention(self.gaussian_convention.value),
             )
         except ValueError as error:
             self._load_config_controls()
@@ -494,7 +565,13 @@ class MatcherLab:
 
     def _press(self, event: MouseEvent) -> None:
         """Hit-test handles in screen pixels, then oriented bodies in scene coordinates."""
-        if event.inaxes is not self.scene_axes or event.button != MouseButton.LEFT:
+        if event.button != MouseButton.LEFT:
+            return
+        for metric, axes in self.metric_axes.items():
+            if event.inaxes is axes:
+                self.matrix_choice.value = metric.value
+                return
+        if event.inaxes is not self.scene_axes:
             return
         if event.xdata is None or event.ydata is None:
             return
@@ -552,7 +629,7 @@ class MatcherLab:
     def _motion(self, event: MouseEvent) -> None:
         """Limit interactive recomputation to at most thirty requests per second."""
         now = monotonic()
-        if isinstance(self.drag, Absent) or now - self.last_motion < 1 / 30:
+        if self.frame_pending or isinstance(self.drag, Absent) or now - self.last_motion < 1 / 30:
             return
         self.last_motion = now
         self._apply_pointer(event)
@@ -568,6 +645,7 @@ class MatcherLab:
 
     def refresh(self) -> None:
         """Recompute assignment and synchronize every visible diagnostic."""
+        self.comparisons = compare_metrics(self.scene, self.config)
         try:
             evaluation = evaluate_costs(self.scene.predictions, self.scene.targets, self.config)
             assignment = solve_assignment(evaluation.total)
@@ -577,82 +655,89 @@ class MatcherLab:
             return
         self.evaluation_error = Absent("Evaluation succeeded")
         self.evaluation, self.assignment = evaluation, assignment
-        self.hausdorff_points.disabled = not any(
-            term.metric == Metric.HAUSDORFF and term.weight > 0 for term in self.config.terms
-        )
-        self.updating = True
-        previous = self.matrix_choice.value
-        self.matrix_choice.options = ["Combined", *(c.metric.value for c in evaluation.components)]
-        self.matrix_choice.value = (
-            previous if previous in self.matrix_choice.options else "Combined"
-        )
-        self.updating = False
         self._draw()
 
     def _draw(self) -> None:
-        """Render the current valid evaluation with optional component inspection."""
-        if isinstance(self.evaluation_error, str):
+        """Render independent metric panels and the currently focused diagnostic."""
+        for result in self.comparisons:
+            draw_metric_panel(
+                self.metric_axes[result.metric],
+                self.scene,
+                result,
+                limits=self.limits,
+                arrows=self.show_arrows.value,
+                focused=self.matrix_choice.value == result.metric.value,
+            )
+        config = self.config
+        evaluation, assignment = self.evaluation, self.assignment
+        error = self.evaluation_error
+        title = "Combined cost · outlined = matched"
+        if self.matrix_choice.value != "Combined":
+            result = next(r for r in self.comparisons if r.metric.value == self.matrix_choice.value)
+            match result:
+                case MetricFailure(reason=reason):
+                    error = reason
+                case MetricMatch(component=component, assignment=focused_assignment):
+                    error = Absent("Focused metric succeeded")
+                    assignment = focused_assignment
+                    evaluation = CostEvaluation(component.cost, (component,))
+                    config = replace(config, terms=(CostTerm(result.metric, 1),))
+                    title = f"{result.metric.value} cost · own assignment"
+        if isinstance(error, str):
             self.scene_axes.clear()
             self.matrix_axes.clear()
             self.details.value = (
                 "<p>Assignment unavailable until the invalid input is corrected.</p>"
             )
-            self._show_error(ValueError(self.evaluation_error))
-            self.figure.canvas.draw_idle()
+            self._show_error(ValueError(error))
+            self._request_frame()
             return
         draw_scene(
             self.scene_axes,
             self.scene,
-            self.assignment,
+            assignment,
             selected=self.selected,
             arrows=self.show_arrows.value,
             limits=self.limits,
         )
-        values = self.evaluation.total
-        title = "Combined cost · outlined = matched"
-        if self.matrix_choice.value != "Combined":
-            component = next(
-                c for c in self.evaluation.components if c.metric.value == self.matrix_choice.value
-            )
-            values = component.cost
-            title = f"{component.metric.value} cost (unweighted) · combined assignment"
-        draw_matrix(self.matrix_axes, self.scene, values, self.assignment, title)
-        self._update_status()
+        self.scene_axes.set_title(
+            f"{self.matrix_choice.value} · drag / resize / rotate", fontsize=11
+        )
+        draw_matrix(self.matrix_axes, self.scene, evaluation.total, assignment, title)
+        self._update_status(evaluation, assignment)
         self._update_formula()
         self.details.value = pair_html(
             self.scene,
-            self.config,
-            self.evaluation,
+            config,
+            evaluation,
             self.pair_prediction.value,
             self.pair_target.value,
         )
-        self.figure.canvas.draw_idle()
+        self._request_frame()
 
-    def _update_status(self) -> None:
+    def _update_status(self, evaluation: CostEvaluation, assignment: Assignment) -> None:
         """Describe selected pairs, unmatched identities, and tied configurations."""
         pairs = (
             ", ".join(
                 f"{self.scene.predictions[i].box.id} → {self.scene.targets[j].id}"
-                for i, j in self.assignment.pairs
+                for i, j in assignment.pairs
             )
             or "No pairs"
         )
         unmatched_p = (
-            ", ".join(
-                self.scene.predictions[i].box.id for i in self.assignment.unmatched_predictions
-            )
+            ", ".join(self.scene.predictions[i].box.id for i in assignment.unmatched_predictions)
             or "none"
         )
         unmatched_g = (
-            ", ".join(self.scene.targets[j].id for j in self.assignment.unmatched_targets) or "none"
+            ", ".join(self.scene.targets[j].id for j in assignment.unmatched_targets) or "none"
         )
         tie_note = (
             " · All costs disabled or zero: arbitrary tied assignment"
-            if not self.evaluation.components
+            if not evaluation.components
             else ""
         )
         self.status.value = (
-            f"<b>{escape(pairs)}</b> · Total: {self.assignment.total:.6g} · "
+            f"<b>{escape(self.matrix_choice.value)}: {escape(pairs)}</b> · Total: {assignment.total:.6g} · "
             f"Unmatched predictions: {escape(unmatched_p)} · Unmatched GT: {escape(unmatched_g)}"
             f"{tie_note}<br>Heatmap colors rescale for each view; compare printed values."
         )
@@ -670,6 +755,11 @@ class MatcherLab:
             f"{self.config.hausdorff_points} boundary points. "
             "Normalize cx/w by x scale and cy/h by y scale before rotation, preserving angle "
             "(RHINO convention). Lower is better; no similarity transform.<br>"
+            f"<b>Gaussian covariance:</b> {escape(self.config.gaussian_convention.value)}. "
+            "Scene coordinates are used directly; x/y normalization controls apply to L1/Hausdorff. "
+            "KL and Bhattacharyya are dimensionless; W2 has scene units; "
+            "Hellinger is in [0,1]. Symmetric KL is the mean of both directions. "
+            "Distance costs ignore the similarity transform. All Gaussian methods lose square-box orientation.<br>"
             "Single class: confidence is constant across each row; it can select rows in an "
             "overcomplete scene but cannot change a square assignment by itself. "
             "Equal-cost optima may switch without a change in optimal total.</p>"

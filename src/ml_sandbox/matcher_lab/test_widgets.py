@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from matplotlib.backend_bases import MouseButton, MouseEvent
+from matplotlib.patches import Rectangle
 
+from .comparison import MetricMatch
 from .costs import Metric, Transform
 from .geometry import corners
 from .presets import baseline, scene_presets
@@ -205,3 +207,69 @@ def test_hausdorff_preset_sampling_and_inspection(lab: MatcherLab) -> None:
     buttons = {button.description: button for button in lab.view.children[4].children}
     buttons["Reset baseline"].click()
     assert lab.hausdorff_points.value == lab.config.hausdorff_points == 4
+
+
+def test_gaussian_convention_and_symmetric_kl_preset(lab: MatcherLab) -> None:
+    """The shared conversion setting updates every enabled Gaussian cost and its inspection."""
+    from .gaussian import CovarianceConvention
+
+    lab.scene_choice.value = "Separated boxes"
+    lab.preset_choice.value = "Geometry only: Symmetric KL (mean)"
+    original = lab.evaluation.total.copy()
+    lab.gaussian_convention.value = CovarianceConvention.HALF_EXTENT.value
+    assert lab.config.gaussian_convention == CovarianceConvention.HALF_EXTENT
+    np.testing.assert_allclose(lab.evaluation.total, original / 3)
+    assert "Shared box → Gaussian converter" in lab.details.value
+    assert "Covariance" in lab.details.value
+    assert CovarianceConvention.HALF_EXTENT.value in lab.details.value
+    lab.matrix_choice.value = Metric.SYMMETRIC_KL.value
+    assert "Symmetric KL" in lab.matrix_axes.get_title()
+    lab.preset_choice.value = "Geometry only: Gaussian W2"
+    assert lab.config.gaussian_convention == CovarianceConvention.UNIFORM
+    assert lab.gaussian_convention.value == CovarianceConvention.UNIFORM.value
+
+
+def test_comparison_panels_follow_edits_and_click_focus(lab: MatcherLab) -> None:
+    """An edit updates all methods; clicking a tile focuses its own assignment matrix."""
+    lab.scene_choice.value = "Oversized competing prediction"
+    before = {
+        result.metric: result.component.cost.copy()
+        for result in lab.comparisons
+        if isinstance(result, MetricMatch)
+    }
+    lab.selection.value = "P1"
+    lab.numeric["cy"].value += 8
+    assert len(lab.metric_axes) == len(lab.comparisons) == 10
+    for result in lab.comparisons:
+        assert isinstance(result, MetricMatch)
+        assert not np.array_equal(before[result.metric], result.component.cost)
+        assert lab.metric_axes[result.metric].get_xlim() == lab.scene_axes.get_xlim()
+    lab.figure.canvas.draw()
+    axes = lab.metric_axes[Metric.HAUSDORFF]
+    x, y = axes.transAxes.transform((0.5, 0.5))
+    event = MouseEvent("button_press_event", lab.figure.canvas, x, y, button=MouseButton.LEFT)
+    lab.figure.canvas.callbacks.process("button_press_event", event)
+    assert lab.matrix_choice.value == Metric.HAUSDORFF.value
+    assert "own assignment" in lab.matrix_axes.get_title()
+    assert "Hausdorff:" in lab.status.value
+    result = next(result for result in lab.comparisons if result.metric == Metric.HAUSDORFF)
+    assert isinstance(result, MetricMatch)
+    outlined = {
+        (round(patch.get_y() + 0.47), round(patch.get_x() + 0.47))
+        for patch in lab.matrix_axes.patches
+        if isinstance(patch, Rectangle)
+    }
+    assert outlined == set(result.assignment.pairs)
+    assert isinstance(lab.drag, Absent)
+
+
+def test_comparison_preview_is_vector_only() -> None:
+    """The saved comparison retains all metric titles without widget or raster content."""
+    from .comparison import GEOMETRIC_METRICS
+    from .visualization import comparison_preview
+
+    svg = comparison_preview(scene_presets()["Oversized competing prediction"], baseline())
+    root = ElementTree.fromstring(svg)
+    assert all(element.tag.rsplit("}", 1)[-1] not in {"image", "script"} for element in root.iter())
+    for metric in GEOMETRIC_METRICS:
+        assert metric.value in svg

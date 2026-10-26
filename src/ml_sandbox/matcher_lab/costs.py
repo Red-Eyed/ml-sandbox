@@ -3,10 +3,11 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from math import isfinite, log
+from math import isfinite
 
 import numpy as np
 
+from .gaussian import CovarianceConvention, Gaussian2D, box_to_gaussian
 from .geometry import Box, FloatArray, angle_distance, rotated_iou
 
 
@@ -17,7 +18,26 @@ class Metric(StrEnum):
     IOU = "Rotated IoU"
     PROBIOU = "ProbIoU"
     HAUSDORFF = "Hausdorff"
+    KL_FORWARD = "KL P → GT"
+    KL_REVERSE = "KL GT → P"
+    SYMMETRIC_KL = "Symmetric KL (mean)"
+    WASSERSTEIN = "Gaussian W2"
+    BHATTACHARYYA = "Bhattacharyya"
+    HELLINGER = "Hellinger"
     CLASSIFICATION = "Classification"
+
+
+GAUSSIAN_METRICS = frozenset(
+    {
+        Metric.PROBIOU,
+        Metric.KL_FORWARD,
+        Metric.KL_REVERSE,
+        Metric.SYMMETRIC_KL,
+        Metric.WASSERSTEIN,
+        Metric.BHATTACHARYYA,
+        Metric.HELLINGER,
+    }
+)
 
 
 class Transform(StrEnum):
@@ -72,6 +92,7 @@ class MatcherConfig:
     y_scale: float = 100.0
     angle_weight: float = 0.0
     hausdorff_points: int = 4
+    gaussian_convention: CovarianceConvention = CovarianceConvention.UNIFORM
 
     def __post_init__(self) -> None:
         """Validate all numerical controls even for empty scenes."""
@@ -106,42 +127,58 @@ class CostEvaluation:
 
 
 def bhattacharyya(a: Box, b: Box) -> float:
-    """Return Gaussian Bhattacharyya distance for covariance R diag(w²,h²) Rᵀ/12.
+    """Return uniform-rectangle Gaussian Bhattacharyya distance through the shared converter."""
+    from .gaussian_overlap import gaussian_bhattacharyya
 
-    Evaluate in a's local frame and common units, solving with Cholesky rather
-    than inverting a covariance. The determinant of each box is known from its
-    dimensions. Unrepresentable covariance or distances raise ValueError.
-    """
-    scale = max(a.width, a.height, b.width, b.height)
-    da = np.array([a.width / scale, a.height / scale], dtype=np.float64)
-    db = np.array([b.width / scale, b.height / scale], dtype=np.float64)
-    relative = a.rotation.T @ b.rotation
-    covariance_a = np.diag(da * da / 12)
-    covariance_b = (relative * (db * db / 12)) @ relative.T
-    mean = (covariance_a + covariance_b) / 2
-    delta = ((b.center - a.center) / scale) @ a.rotation
-    try:
-        root = np.linalg.cholesky(mean)
-        whitened = np.linalg.solve(root, delta)
-    except np.linalg.LinAlgError as error:
-        raise ValueError("Gaussian covariance is outside float64 resolution") from error
-    logdet_mean = 2 * float(np.log(np.diag(root)).sum())
-    logdet_a = 2 * (log(a.width) + log(a.height) - 2 * log(scale)) - 2 * log(12)
-    logdet_b = 2 * (log(b.width) + log(b.height) - 2 * log(scale)) - 2 * log(12)
-    distance = float(whitened @ whitened) / 8 + (logdet_mean - (logdet_a + logdet_b) / 2) / 2
-    if not isfinite(distance) or distance < -1e-10:
-        raise ValueError("Bhattacharyya distance is outside float64 resolution")
-    return max(distance, 0.0)
+    return gaussian_bhattacharyya(box_to_gaussian(a), box_to_gaussian(b))
 
 
 def log_probiou(distance: float) -> float:
-    """Return log(1 - Hellinger) without cancellation for well-separated boxes."""
-    return -distance - float(np.log1p(np.sqrt(-np.expm1(-distance))))
+    """Retain the original public helper for stable log ProbIoU."""
+    from .gaussian_overlap import log_probiou as evaluate
+
+    return evaluate(distance)
 
 
 def probiou(a: Box, b: Box) -> float:
-    """Return Gaussian ProbIoU in [0,1]; extreme separation can underflow to zero."""
-    return float(np.exp(log_probiou(bhattacharyya(a, b))))
+    """Return uniform-rectangle Gaussian ProbIoU through the shared converter."""
+    from .gaussian_overlap import gaussian_probiou
+
+    return gaussian_probiou(box_to_gaussian(a), box_to_gaussian(b))
+
+
+def gaussian_metric(metric: Metric, prediction: Gaussian2D, target: Gaussian2D) -> float:
+    """Evaluate a selected Gaussian method on already converted distributions."""
+    match metric:
+        case Metric.KL_FORWARD | Metric.KL_REVERSE | Metric.SYMMETRIC_KL:
+            from .gaussian_kl import gaussian_kl, symmetric_kl
+
+            match metric:
+                case Metric.KL_FORWARD:
+                    return gaussian_kl(prediction, target)
+                case Metric.KL_REVERSE:
+                    return gaussian_kl(target, prediction)
+                case Metric.SYMMETRIC_KL:
+                    return symmetric_kl(prediction, target)
+        case Metric.WASSERSTEIN:
+            from .gaussian_wasserstein import gaussian_wasserstein
+
+            return gaussian_wasserstein(prediction, target)
+        case Metric.BHATTACHARYYA | Metric.HELLINGER | Metric.PROBIOU:
+            from .gaussian_overlap import (
+                gaussian_bhattacharyya,
+                gaussian_hellinger,
+                gaussian_probiou,
+            )
+
+            match metric:
+                case Metric.BHATTACHARYYA:
+                    return gaussian_bhattacharyya(prediction, target)
+                case Metric.HELLINGER:
+                    return gaussian_hellinger(prediction, target)
+                case Metric.PROBIOU:
+                    return gaussian_probiou(prediction, target)
+    raise ValueError(f"{metric} is not a Gaussian metric")
 
 
 def raw_metric(metric: Metric, prediction: Prediction, target: Box, config: MatcherConfig) -> float:
@@ -156,8 +193,20 @@ def raw_metric(metric: Metric, prediction: Prediction, target: Box, config: Matc
             )
         case Metric.IOU:
             return rotated_iou(box, target)
-        case Metric.PROBIOU:
-            return probiou(box, target)
+        case (
+            Metric.PROBIOU
+            | Metric.KL_FORWARD
+            | Metric.KL_REVERSE
+            | Metric.SYMMETRIC_KL
+            | Metric.WASSERSTEIN
+            | Metric.BHATTACHARYYA
+            | Metric.HELLINGER
+        ):
+            return gaussian_metric(
+                metric,
+                box_to_gaussian(box, convention=config.gaussian_convention),
+                box_to_gaussian(target, convention=config.gaussian_convention),
+            )
         case Metric.HAUSDORFF:
             from .hausdorff import hausdorff_distance
 
@@ -177,7 +226,16 @@ def transform_cost(metric: Metric, raw: FloatArray, config: MatcherConfig) -> Fl
     match metric:
         case Metric.CLASSIFICATION:
             return -np.log(np.maximum(raw, config.epsilon))
-        case Metric.L1 | Metric.HAUSDORFF:
+        case (
+            Metric.L1
+            | Metric.HAUSDORFF
+            | Metric.KL_FORWARD
+            | Metric.KL_REVERSE
+            | Metric.SYMMETRIC_KL
+            | Metric.WASSERSTEIN
+            | Metric.BHATTACHARYYA
+            | Metric.HELLINGER
+        ):
             return raw.copy()
         case Metric.IOU | Metric.PROBIOU:
             match config.transform:
@@ -201,11 +259,27 @@ def evaluate_costs(
     shape = (len(predictions), len(targets))
     total = np.zeros(shape, dtype=np.float64)
     components: list[Component] = []
+    gaussians: dict[str, Gaussian2D] = {}
+    if all(shape) and any(
+        term.metric in GAUSSIAN_METRICS and term.weight > 0 for term in config.terms
+    ):
+        gaussians = {
+            box.id: box_to_gaussian(box, convention=config.gaussian_convention)
+            for box in (*targets, *(p.box for p in predictions))
+        }
     for term in config.terms:
         if term.weight == 0:
             continue
         raw = np.array(
-            [[raw_metric(term.metric, p, t, config) for t in targets] for p in predictions],
+            [
+                [
+                    gaussian_metric(term.metric, gaussians[p.box.id], gaussians[t.id])
+                    if term.metric in GAUSSIAN_METRICS
+                    else raw_metric(term.metric, p, t, config)
+                    for t in targets
+                ]
+                for p in predictions
+            ],
             dtype=np.float64,
         ).reshape(shape)
         cost = transform_cost(term.metric, raw, config)
